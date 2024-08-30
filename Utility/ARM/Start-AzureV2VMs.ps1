@@ -28,36 +28,26 @@
 
 #>
 
-#Requires -Module AzureRM.Profile
-#Requires -Module AzureRM.Compute
+#Requires -Module Az.Accounts
+#Requires -Module Az.Compute
 
 <#
 .SYNOPSIS
-  Connects to Azure and starts of all VMs in the specified Azure subscription or resource group
+  Connects to Azure and starts all VMs in the specified Azure subscription or resource group
 
 .DESCRIPTION
   This runbook connects to Azure and starts all VMs in an Azure subscription or resource group.  
   You can attach a schedule to this runbook to run it at a specific time. Note that this runbook does not stop
-  Azure classic VMs. Use https://gallery.technet.microsoft.com/scriptcenter/Start-Azure-Classic-VMs-86ef746b for that.
-
-.PARAMETER AzureConnectionAssetName
-   Optional with default of "AzureRunAsConnection".
-   The name of an Automation connection asset that contains an Azure AD service principal with authorization for the subscription
-   you want to start VMs in. To use an asset with a different name you can pass the asset name as a runbook input parameter or change
-   the default value for this input parameter.
-
-   If you selected "Create Azure Run As Account" when creating the automation account running this runbook, you will already
-   have a connection asset with the default name ("AzureRunAsConnection") set up. If not, you can create a connection asset / Azure AD
-   service principal by following the directions here: https://azure.microsoft.com/en-us/documentation/articles/automation-sec-configure-azure-runas-account
+  Azure classic VMs.
 
 .PARAMETER ResourceGroupName
    Optional
    Allows you to specify the resource group containing the VMs to start.  
-   If this parameter is included, only VMs in the specified resource group will be stopped, otherwise all VMs in the subscription will be stopped.  
+   If this parameter is included, only VMs in the specified resource group will be started, otherwise all VMs in the subscription will be started.  
 
 .NOTES
    AUTHOR: Azure Automation Team 
-   LASTEDIT: April 2, 2016
+   LASTEDIT: August 30, 2024
 #>
 
 # Returns strings with status messages
@@ -65,45 +55,30 @@
 
 param (
     [Parameter(Mandatory=$false)] 
-    [String]  $AzureConnectionAssetName = "AzureRunAsConnection",
-
-    [Parameter(Mandatory=$false)] 
     [String] $ResourceGroupName
 )
 
 try {
-    # Connect to Azure using service principal auth
-    $ServicePrincipalConnection = Get-AutomationConnection -Name $AzureConnectionAssetName         
-
-    Write-Output "Logging in to Azure..."
-
-    $Null = Add-AzureRmAccount `
-        -ServicePrincipal `
-        -TenantId $ServicePrincipalConnection.TenantId `
-        -ApplicationId $ServicePrincipalConnection.ApplicationId `
-        -CertificateThumbprint $ServicePrincipalConnection.CertificateThumbprint 
+    # Log in to Azure using the Managed Identity of the Automation Account
+    Write-Output "Logging in to Azure using Managed Identity..."
+    $AzContext = Connect-AzAccount -Identity -ErrorAction Stop
 }
 catch {
-    if(!$ServicePrincipalConnection) {
-        throw "Connection $AzureConnectionAssetName not found."
-    }
-    else {
-        throw $_.Exception
-    }
+    throw "Failed to log in to Azure using Managed Identity. Error: $_"
 }
 
 # If there is a specific resource group, then get all VMs in the resource group,
 # otherwise get all VMs in the subscription.
 if ($ResourceGroupName) { 
-	$VMs = Get-AzureRmVM -ResourceGroupName $ResourceGroupName
+	$VMs = Get-AzVM -ResourceGroupName $ResourceGroupName
 }
 else { 
-	$VMs = Get-AzureRmVM
+	$VMs = Get-AzVM
 }
 
 # Start each of the VMs
 foreach ($VM in $VMs) {
-	$StartRtn = $VM | Start-AzureRmVM -ErrorAction Continue
+	$StartRtn = $VM | Start-AzVM -ErrorAction Continue
 
 	if (!$StartRtn.IsSuccessStatusCode) {
 		# The VM failed to start, so send notice
